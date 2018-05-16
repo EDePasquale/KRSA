@@ -172,8 +172,11 @@ make_graphs <- function(controlSamplesTest, experimentalSamplesTest, fullDataSet
     #   results_table_c[,3]=apply(rbind(slopes, as.numeric(results_table_c[,3])),2, mean)
     # }
   }
+  kitty<<-cbind(results_table_c[,1], apply(results_table_c[,seq(3,ncol(results_table_c), 3)],2,as.numeric))
+  for(x in 2:ncol(kitty)){
+    colnames(kitty)[x]=paste0("control_", (x-1))
+  }
   results_table_c=cbind(results_table_c[,1], apply(apply(results_table_c[,seq(2,ncol(results_table_c), 3)],2,as.numeric), 1, mean),apply(apply(results_table_c[,seq(3,ncol(results_table_c), 3)],2,as.numeric), 1, mean))
-  
   
   #For each unique sample (experimental)
   results_table_e=NULL
@@ -211,9 +214,16 @@ make_graphs <- function(controlSamplesTest, experimentalSamplesTest, fullDataSet
     #   results_table_e[,3]=apply(rbind(slopes, as.numeric(results_table_e[,3])),2, mean)
     # }
   }
+  kitty2<<-cbind(results_table_e[,1], apply(results_table_e[,seq(3,ncol(results_table_e), 3)],2,as.numeric))
+  for(x in 2:ncol(kitty2)){
+    colnames(kitty2)[x]=paste0("experimental_", (x-1))
+  }
+  
   results_table_e=cbind(results_table_e[,1], apply(apply(results_table_e[,seq(2,ncol(results_table_e), 3)],2,as.numeric), 1, mean),apply(apply(results_table_e[,seq(3,ncol(results_table_e), 3)],2,as.numeric), 1, mean))
   
   results_table=inner_join(as.data.frame(results_table_c), as.data.frame(results_table_e), by="V1")
+  new_kitty=inner_join(as.data.frame(kitty), as.data.frame(kitty2), by="V1")
+  new_kitty[,ncol(new_kitty)+1]=as.numeric(as.character(results_table[,3]))/as.numeric(as.character(results_table[,5]))
   if(opt1==T){ #Remove substrates without a max value of above 2 for each sample
     print("in opt 1")
     temp=matrix(ncol=length(allSamples_u), nrow=length(goodRows))
@@ -248,7 +258,8 @@ make_graphs <- function(controlSamplesTest, experimentalSamplesTest, fullDataSet
   # goodResults[,7]=2^goodResults[,6]
   # goodResults=goodResults[which(goodResults[,7]<=lower | goodResults[,7]>=upper),]
   results_table[,6]=as.numeric(as.character(results_table[,3]))/as.numeric(as.character(results_table[,5]))
-  results_table_prime=results_table
+  results_table_prime=new_kitty
+  num_good<<-nrow(results_table)
   #TODO: save previous results table for heatmap
   results_table=results_table[which(results_table[,6]<=lower | results_table[,6]>=upper),]
   
@@ -330,7 +341,9 @@ ui <- shinyUI(fluidPage(
   mainPanel(
     tabsetPanel(
       tabPanel("Step 1: Options",
-               dataTableOutput('contents0'),
+               h4("Preview of data"),
+               shiny::dataTableOutput(outputId="contents0"),
+               #dataTableOutput('contents0'),
                h4("Data input options:"),
                #celltype
                fluidRow(
@@ -362,10 +375,13 @@ ui <- shinyUI(fluidPage(
                h4("Control and Experimental Tables:"),
                fluidRow(
                  column(6,
-                        DT::dataTableOutput('contents1')
+                        #DT::dataTableOutput('contents1')
+                        h4("Preview of control data"),
+                        shiny::dataTableOutput(outputId="contents1")
                         ),
                  column(6,
-                        DT::dataTableOutput('contents2')
+                        h4("Preview of experimental data"),
+                        shiny::dataTableOutput(outputId="contents2")
                         )
                ),
                tags$hr()
@@ -411,6 +427,25 @@ ui <- shinyUI(fluidPage(
           selectInput("kinase", "Choose a Kinase:", choices=c()), 
           plotOutput("histo", width = "100%", height="600px"),
           downloadButton('downloadData', 'Download Histogram')
+      ),
+      tabPanel("Step 6: Heatmap",
+                fluidRow(
+                 column(6,
+                        sliderInput("slider2", label = "Breaks", min = -10,
+                                    max = 10, value = c(-4, 4)),
+                        selectInput("clust", "Clustering method:", choices=c("complete", "ward.D", "ward.D2", "single", "average", "mcquitty", "median", "centroid"))
+
+                 ),
+                 column(6,
+                        selectInput("low", "Choose low phosphorylation color:", choices=c("cyan", "orange", "yellow", "green", "darkgreen", "red", "blue", "purple", "magenta")),
+                        selectInput("mid", "Choose middle phosphorylation color:", choices=c("black", "white")),
+                        selectInput("high", "Choose high phosphorylation color:", choices=c("yellow", "orange", "red", "green", "darkgreen", "cyan", "blue", "purple", "magenta")),
+                        downloadButton('downloadDataH', 'Download Heatmap')
+                 )
+               ),
+
+                hr(),
+                plotOutput("heatmap", width = "100%", height="1200px")
       )
     )
 
@@ -448,7 +483,8 @@ server <- function(input, output, session) {
   })
   
   #Output for rendering the preview table in the main panel.
-  output$contents0 <- DT::renderDataTable({
+  #output$contents0 <- DT::renderDataTable({
+  output$contents0 <- shiny::renderDataTable({
     if(is.null(input$celltype)){
       return(data_set0())
     }else{
@@ -456,10 +492,12 @@ server <- function(input, output, session) {
       barcodeColumns2=data_set0()[,barcodeColumns]
       return(barcodeColumns2)
     }
-  }, caption = "Preview of raw data file")
+  #}, caption = "Preview of raw data file")
+  }, options=list(scrollX=TRUE, pageLength = 10))
   
   #Output for rendering the preview table in the main panel.
-  output$contents1 <- DT::renderDataTable({
+  #output$contents1 <- DT::renderDataTable({
+  output$contents1 <- shiny::renderDataTable({
     if(is.null(input$controlSamples)){
       return(data_set0())
     }else{
@@ -477,10 +515,12 @@ server <- function(input, output, session) {
       controlSamplesTest<<-barcodeColumns2
       return(barcodeColumns2)
     }
-  }, caption = "Preview of control data", options=list(autoWidth=TRUE))
+  #}, caption = "Preview of control data", options=list(autoWidth=TRUE))
+  }, options=list(scrollX=TRUE, pageLength = 10))
   
   #Output for rendering the preview table in the main panel.
-  output$contents2 <- DT::renderDataTable({
+  #output$contents2 <- DT::renderDataTable({
+  output$contents2 <- shiny::renderDataTable({
     if(is.null(input$experimentalSamples)){
       return(data_set0())
     }else{
@@ -497,8 +537,9 @@ server <- function(input, output, session) {
       experimentalSamplesTest<<-barcodeColumns2
       return(barcodeColumns2)
     }
-  }, caption = "Preview of experimental data", options=list(autoWidth=TRUE))
-
+  #}, caption = "Preview of experimental data", options=list(autoWidth=TRUE))
+  }, options=list(scrollX=TRUE, pageLength = 10))
+    
   #barcode select
   observe({
     barcodeOptions=grep("Barcode", data_set0())
@@ -727,7 +768,9 @@ server <- function(input, output, session) {
     })
     
     output$remain2 <- renderText({
-      paste0( nrow(resultsTable), "/", nrow(resultsTablePrime), " (", round((nrow(resultsTable)/nrow(resultsTablePrime))*100, 2), "%) substrates were chosen for KRSA analysis.")
+      paste0( nrow(resultsTable), "/", num_good, " (", round((nrow(resultsTable)/num_good)*100, 2), "%) substrates were chosen for KRSA analysis.")
+      
+      #paste0( nrow(resultsTable), "/", nrow(resultsTablePrime), " (", round((nrow(resultsTable)/nrow(resultsTablePrime))*100, 2), "%) substrates were chosen for KRSA analysis.")
     })
     
     output$subnum <- renderText({
@@ -791,13 +834,81 @@ server <- function(input, output, session) {
   })
   
   #Download Histogram
+  # output$downloadData <- downloadHandler(
+  #   filename = 'test.pdf', #This is necessary even though it doesn't save it as 'test.pdf', you have to name it 'something.pdf' instead.
+  #   content = function(file) {
+  #     pdf(file,width=7,height=10)
+  #     plotInput()
+  #     dev.off()
+  #   })
   output$downloadData <- downloadHandler(
+    filename = function() { paste0(input$kinase, ".pdf") },
+    content = function(file) {
+      ggsave(file, plot = plotInput(), device = "pdf")
+    }
+  )
+  
+  #For Heatmap
+  plotInputH <- function(){
+    #For the breaks
+    breaks=seq(input$slider2[1], #start point of color key
+               input$slider2[2],  #end point of color key
+               by=(input$slider2[2]-input$slider2[1])/50) #length of sub-division
+
+    #Make sure that heatmap doesn't break by trying to cluster all the genes!
+    # if(nrow(dataForHeatmap)>1000){
+    #   dataForHeatmap=dataForHeatmap[1:1000,]
+    # }
+
+    ##TODO: logically reduce samples shown
+
+    #Make column 1 rownames
+    # dataForHeatmap2 <- dataForHeatmap[,-1]
+    # rownames(dataForHeatmap2) <- dataForHeatmap[,1]
+
+    #heatmap colors
+    mycol=colorpanel(n=length(breaks)-1,low=input$low,mid=input$mid,high=input$high)
+
+    resultsTablePrime2=resultsTablePrime[order(-abs(as.numeric(resultsTablePrime[,ncol(resultsTablePrime)]))),]
+    row.names(resultsTablePrime2)=resultsTablePrime2[,1]
+    resultsTablePrime2=resultsTablePrime2[,2:(ncol(resultsTablePrime2)-1)]
+    resultsTablePrime2<<-resultsTablePrime2
+
+
+    #Make heatmap
+    temp=log2(as.matrix(apply(resultsTablePrime2, 2, as.numeric))+0.1)
+    row.names(temp)=resultsTablePrime[order(-abs(as.numeric(resultsTablePrime[,ncol(resultsTablePrime)]))),1]
+    heatmap.2(temp, #the matrix
+              scale="row", 
+              Colv=FALSE, # No clustering of columns
+              Rowv = FALSE, #no clustering of rows
+              hclustfun = function(x) hclust(x,method = input$clust), #clustering function
+              col=mycol, #colors used in heatmap
+              # ColSideColors = cc, #column color bar
+              breaks=breaks, #color key details
+              trace="none", #no trace on map
+              na.rm=TRUE, #ignore missing values
+              margins = c(15,10), # size and layout of heatmap window
+              xlab = "Conditions", #x axis title
+              ylab =  "Substrates",
+              srtCol=90) # y axis title
+  }
+
+  #Display Heatmap
+  output$heatmap <- renderPlot({
+    plotInputH()
+  })
+
+  #Download Heatmap
+  #TODO: fix this 
+  output$downloadDataH <- downloadHandler(
     filename = 'test.pdf', #This is necessary even though it doesn't save it as 'test.pdf', you have to name it 'something.pdf' instead.
     content = function(file) {
       pdf(file,width=7,height=10)
       plotInput()
       dev.off()
     })
+  
   
 }
 
